@@ -1,0 +1,539 @@
+<html>
+<head>
+  <title>Bloom Jewel - Speed Tagger</title>
+  <style>
+    body {
+      background: black;
+      color: white;
+    }
+    * {
+      font-family: Helvetica, sans-serif;
+    }
+    a {
+      text-decoration: none;
+    }
+    #factory {
+      display: none; 
+    }
+    #image-grid {
+      width: 100%;
+      gap: 0.8em 0.8em;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+    }
+    .grid {
+      display: grid;
+      align-items: center;
+    }
+    .grid .grid-col-start {
+      grid-column-start: 1;
+      grid-column-end: 1;
+    }
+    .grid > .grid-row {
+      display: contents;
+    }
+    .selected {
+      color: rgb(224, 160, 255);
+      background: rgba(32, 8, 64, 0.5);
+    }
+    #image-grid-op {
+      font-size: 0.9em;
+    }
+    #image-grid-op label {
+      display: block;
+      margin-top: 0.8em;
+      margin-bottom: 0.8em;
+    }
+    #image-grid-op textarea {
+      width: 100%;
+      height: 8em;
+    }
+    [data-onclick-copy] {
+      // user-select: none;
+      cursor: default;
+    }
+    #tag-suggestions {
+      font-size: 0.7em;
+      cursor: default;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.5em 0.8em;
+    }
+    #tag-suggestions * {
+      overflow: hidden;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body style="text-align: center;">
+  <div id="selection-bar">
+    <select id="selection-group" name='batch-selector'></select>
+  </div>
+  <div id="image-grid" class='grid'>
+    <div id="image-grid-op" class="grid-row">
+      <div><label>Tag Add</label><textarea name="add-tags" placeholder="newline separated tags"></textarea></div>
+      <div><label>Tag Remove</label><textarea name="delete-tags" placeholder="newline separated tags"></textarea></div>
+      <div></div>
+      <div><button id="op-submit">Update</button></div>
+      <div id="tag-selection-raw" data-onclick-copy="0"></div>
+      <div id="artist-info"></div>
+      <div id="tag-suggestions" style="grid-column: span 2;" class="grid"></div>
+    </div>
+  </div>
+  <div id="factory">
+    <option id="option-placeholder-on" disabled>Select Artwork Batch</option>
+    <option id="option-placeholder-none" disabled>No Artwork Batch Available</option>
+  </div>
+  <script>
+  const SERVER_ORIGIN = location.origin;
+  document.addEventListener('SKCM.RefreshOnClickCopy', function(e){
+    document.querySelectorAll('[data-onclick-copy]').forEach(function(elm){
+      if(elm.dataset.onclickCopy > 0) return;
+      elm.dataset.onclickCopy = 1;
+      elm.addEventListener('click', function(){
+        navigator.clipboard.writeText(elm.textContent);
+      });
+    });
+  });
+  document.addEventListener('SKCM.StateApproved', function(e){
+    function factoryClone(selector, callback) {
+      const factory = document.getElementById('factory');
+      const clonedNode = factory.querySelector(selector).cloneNode(true);
+      clonedNode.attributes.removeNamedItem('id')
+      if (typeof callback === 'function')
+        callback(clonedNode);
+      return clonedNode;
+    }
+
+    const response = e.detail;
+    const selectionNavbar = document.getElementById('selection-bar');
+    const dropdownElm = document.getElementById('selection-group');
+    selectionNavbar.querySelectorAll('button').forEach(function(buttonElm){buttonElm.remove();});
+    dropdownElm.querySelectorAll('option').forEach(function(optionElm){optionElm.remove();});
+
+    const optionElmList = [];
+    const jumpIDs = [];
+    if(response.user_images)
+      [].push.apply(optionElmList, response.user_images.keys.map(function(artistID, i){
+        const firstImageID = response.user_images.values[i][0];
+        const artist = response.users.find(function(user){ return user.id == artistID; });
+        const optionElm = document.createElement('option');
+        optionElm.textContent = artistID > 0 ?
+          `#${firstImageID.toLocaleString('en-US')}: ${artist.name} (${artist.username})` :
+          `<DELETED>`;
+        if (artistID > 0) {
+          optionElm.dataset.batchId = firstImageID;
+          optionElm.dataset.artistName = artist.name;
+          optionElm.dataset.artistUsername = artist.username;
+        }
+        optionElm.label = artistID > 0 ? firstImageID : 'deleted';
+        optionElm.value = artistID;
+        if (artistID > 0) jumpIDs.push(firstImageID);
+        return optionElm;
+      }));
+
+    if(optionElmList.length)
+      dropdownElm.append(factoryClone('option#option-placeholder-on')),
+      Element.prototype.append.apply(dropdownElm, optionElmList);
+    else
+      dropdownElm.append(factoryClone('option#option-placeholder-none'));
+    dropdownElm.dispatchEvent(new Event('change'));
+
+    if(response.user_images) (function(){
+      const jumpToRanges = {};
+      const jumpToEndRanges = [Math.min, Math.max].map(function(f){
+        return f.apply(null, jumpIDs);
+      });
+
+      jumpToRanges['1'] = Object.freeze(jumpIDs);
+      [['10k', 10000], ['100k', 100000]].forEach(function(rangeOption){
+        const rangeText = rangeOption[0], rangeValue = rangeOption[1];
+        const roundedEnd = [
+          Math.floor(jumpToEndRanges[0] / rangeValue) * rangeValue,
+          Math.ceil(jumpToEndRanges[1] / rangeValue) * rangeValue,
+        ];
+        const jumpCurrentRange = [];
+        for(let rangeAnchor = roundedEnd[0]; rangeAnchor < roundedEnd[1]; rangeAnchor += rangeValue)
+          jumpCurrentRange.push(jumpIDs.find(function(firstImageID){return firstImageID >= rangeAnchor}));
+        jumpCurrentRange.push(jumpToEndRanges[1]);
+        jumpToRanges[rangeText] = Object.freeze(jumpCurrentRange);
+      });
+      jumpToRanges['x'] = Object.freeze(jumpToEndRanges);
+      Object.freeze(jumpToRanges);
+
+      function moveSeek(value, key, isBackward) {
+        return isBackward ?
+          ((value > jumpToEndRanges[0]) ? jumpToRanges[key].findLast(function(anchorID){return anchorID < value;}) : jumpToEndRanges[0]) :
+          ((value < jumpToEndRanges[1]) ? jumpToRanges[key].find(function(anchorID){return anchorID > value;}) : jumpToEndRanges[1]);
+      }
+
+      Object.keys(jumpToRanges).forEach(function(rangeText){
+        ['-', '+'].forEach(function(seekDirection){
+          const isForwardSeek = seekDirection == '+';
+          const isBackwardSeek = seekDirection == '-';
+
+          const seekElm = document.createElement('button');
+          const seekLabel = rangeText !== 'x' ? `${seekDirection}${rangeText}` : ['F', 'L'][isForwardSeek | 0];
+          seekElm.append(seekLabel);
+          seekElm.addEventListener('click', function(e){
+            if (dropdownElm.disabled) return;
+            e.preventDefault();
+
+            const currentArtistID = Number(dropdownElm.value);
+            const currentSelection = jumpIDs[response.user_images.keys.indexOf(currentArtistID)];
+            const nextSelection = moveSeek(currentSelection, rangeText, isBackwardSeek);
+            const nextArtistID = response.user_images.keys[jumpIDs.indexOf(nextSelection)];
+
+            if (currentSelection !== nextSelection)
+              dropdownElm.value = nextArtistID, dropdownElm.dispatchEvent(new Event('change'));
+          });
+          if (isForwardSeek)
+            selectionNavbar.append(seekElm);
+          else if (isBackwardSeek)
+            selectionNavbar.prepend(seekElm);
+        });
+      });
+    })();
+  });
+  document.addEventListener('SKCM.BatchLoad', function(e){
+    const response = e.detail;
+    const grid = document.getElementById('image-grid');
+    grid.querySelectorAll('div.grid-row').forEach(function(elm, i){i > 0 && elm.remove();});
+    const gridOp = document.getElementById('image-grid-op');
+    gridOp.querySelectorAll('textarea').forEach(function(elm){ elm.value = ''; });
+    gridOp.children[2].querySelectorAll('input').forEach(function(elm){ elm.disabled = true; });
+
+    const groupedImage = response.reduce(function(out, imgData){
+      if (!(imgData.pixiv_id in out)) out[imgData.pixiv_id] = [];
+      return out[imgData.pixiv_id].push(imgData), out;
+    }, {});
+
+    document.getElementById('tag-selection-raw').textContent = Object.keys(groupedImage).map(function(pixivID){return `set:pixiv-${pixivID}`;}).join(' || ');
+    const dropdownElm = document.getElementById('selection-group');
+    document.getElementById('artist-info').innerHTML = '';
+    if (dropdownElm.value === '0') {
+      document.getElementById('artist-info').append('Compilation of Deleted Artworks.');
+    } else {
+      const optionElm = dropdownElm.querySelector(`option[value="${dropdownElm.value}"]`);
+      document.getElementById('artist-info').append(
+        `Artist Name: ${optionElm.dataset.artistName}`,
+        document.createElement('br'),
+        `Artist Username: ${optionElm.dataset.artistUsername}`
+      );
+    }
+
+    function updateSelectedArtworks(accountAll){
+      const archiveTick = gridOp.querySelector('input[name=flag-archive]');
+      const deleteOption = gridOp.querySelectorAll('input[name=flag-deletion]');
+      const artworkElms = [];
+      [].push.apply(artworkElms, grid.querySelectorAll('div.selected[data-pixiv-id][data-artwork-state]'));
+      if (!artworkElms.length)
+        if (accountAll) {
+          [].push.apply(artworkElms, grid.querySelectorAll('div[data-pixiv-id][data-artwork-state]'));
+        } else {
+          return;
+        }
+
+      const tally = {};
+      artworkElms.forEach(function(elm){
+        tally[elm.dataset.artworkState] = (tally[elm.dataset.artworkState] | 0) + 1;
+      });
+      
+      deleteOption.forEach(function(elm){ elm.checked = false; });
+      archiveTick.indeterminate = Object.keys(tally).length !== 1
+      if (!archiveTick.indeterminate) {
+        archiveTick.checked = 'a' in tally;
+      }
+    }
+
+    const gridRowSet = [];
+
+    Object.keys(groupedImage).forEach(function(pixivID){
+      const artworkImages = groupedImage[pixivID];
+      const pixivData = artworkImages[0].pixiv;
+      
+      const groupHeaderRow = document.createElement('div');
+      groupHeaderRow.classList.add('grid-row');
+      groupHeaderRow.dataset.pixivId = pixivID;
+      groupHeaderRow.style.fontSize = '0.7em';
+      groupHeaderRow.style.marginTop = '1.25rem';
+      groupHeaderRow.style.borderTop = 'black 4px solid';
+
+      const headerCells = Array.from({length: 4}).map(function(){ return document.createElement('div'); });
+      headerCells[0].append(document.createElement('a'));
+      headerCells[0].children[0].href = `https://pixiv.net/artworks/${pixivID}`;
+      headerCells[0].children[0].append(`#${Number(pixivID).toLocaleString('en-US')}`);
+      if (pixivData.user_id) {
+        headerCells[0].append(document.createElement('br'));
+        headerCells[0].append(document.createElement('a'));
+        headerCells[0].children[2].href = `https://pixiv.net/users/${pixivData.user_id}`;
+        headerCells[0].children[2].append(`Artist: #${Number(pixivData.user_id).toLocaleString('en-US')}`);
+      }
+      if (pixivData.title && pixivData.caption) {
+        headerCells[1].append(pixivData.title, document.createElement('hr'), pixivData.caption);
+      } else {
+        headerCells[1].append(pixivData.title || pixivData.caption);
+      }
+      headerCells[2].classList.add('grid');
+      headerCells[2].style.fontSize = '0.95em';
+      headerCells[2].style.gridTemplateColumns = '1fr 1fr';
+      Array.from({length: 10}).forEach(function(x, i){
+        const t = (i <= pixivData.tags.length) ? pixivData.tags[i] : '';
+        const tagElm = document.createElement('div');
+        t && tagElm.append(t);
+        headerCells[2].append(tagElm);
+      });
+      headerCells[3].append(pixivData.status);
+      Element.prototype.append.apply(groupHeaderRow, headerCells);
+
+      gridRowSet.push(groupHeaderRow);
+
+      const artworkRows = [];
+      artworkImages.forEach(function(artworkImage){
+        const artworkRow = document.createElement('div');
+        artworkRow.classList.add('grid-row');
+        artworkRow.dataset.pixivId = pixivID;
+        artworkRow.dataset.artworkHash = artworkImage.hash;
+        let state;
+        if(artworkImage.flags.indexOf('archived')+1) state = 'a';
+        if(artworkImage.flags.indexOf('inbox')+1) state = 'i';
+        if(artworkImage.flags.indexOf('trash')+1) state = 't';
+        artworkRow.dataset.artworkState = state;
+        artworkRow.style.fontSize = '0.8em';
+
+        const artworkCells = Array.from({length: 4}).map(function(){ return document.createElement('div'); });
+        const thumbnailCell = document.createElement('a');
+        thumbnailCell.target = '_blank';
+        thumbnailCell.append(document.createElement('img'));
+        thumbnailCell.children[0].loading = 'lazy';
+        thumbnailCell.children[0].src = `${SERVER_ORIGIN}/galleries/thumbnail/${artworkImage.hash}`;
+        thumbnailCell.href = `${SERVER_ORIGIN}/galleries/full/${artworkImage.hash}`;
+        artworkCells[0].append(thumbnailCell);
+        ['raw', 'display'].forEach(function(k, i){
+          const tagList = document.createElement('div');
+          tagList.style.display = 'flex';
+          tagList.style.flexDirection = 'column';
+          artworkImage.tags[k].forEach(function(tag){
+            const tagElm = document.createElement('div');
+            tagElm.append(tag), tagList.append(tagElm);
+          });
+          artworkCells[i + 1].append(tagList);
+        });
+        artworkRow.addEventListener('click', function(){
+          const cl = artworkRow.classList;
+          cl[(cl.contains('selected') ? 'remove' : 'add')].call(cl, 'selected');
+          updateSelectedArtworks();
+        });
+        
+        Element.prototype.append.apply(artworkRow, artworkCells);
+        artworkRows.push(artworkRow);
+      });
+
+      [].push.apply(gridRowSet, artworkRows);
+
+      groupHeaderRow.addEventListener('click', function(){
+        const isAll = artworkRows.every(function(elm){ return elm.classList.contains('selected'); });
+        artworkRows.forEach(function(elm){
+          const cl = elm.classList;
+          cl[(cl.contains('selected') ? 'remove' : 'add')].call(cl, 'selected');
+        });
+        updateSelectedArtworks();
+      });
+    });
+
+    gridRowSet.forEach(function(rowSetElm){
+      rowSetElm.children[0].classList.add('grid-col-start');
+    });
+    gridRowSet.length && gridOp.children[2].querySelectorAll('input').forEach(function(elm){
+      if(elm.name == 'flag-deletion-clear') return;
+      elm.disabled = false;
+    });
+    Element.prototype.append.apply(grid, gridRowSet);
+    updateSelectedArtworks(true);
+    document.dispatchEvent(new CustomEvent('SKCM.RefreshOnClickCopy', {}));
+  });
+  document.addEventListener('SKCM.RefreshTagSuggestions', function(e){
+    const suggestedTags = e.detail;
+    const suggestedTagElm = document.getElementById('tag-suggestions');
+    suggestedTagElm.querySelectorAll('div').forEach(function(elm){elm.remove();});
+
+    suggestedTags.forEach(function(potentialTag, i){
+      if (i >= 50) return false;
+      const tagElm = document.createElement('div');
+      tagElm.dataset.onclickCopy = 0;
+      tagElm.append(potentialTag.value);
+      suggestedTagElm.append(tagElm);
+    });
+  });
+
+  document.body.addEventListener('dragover', function(e){ e.preventDefault(); });
+  document.body.addEventListener('drop', function(e){
+    e.preventDefault();
+    function processFile(file) {
+      if (file.type != 'application/json') return;
+      file.text().then(function(content){
+        const state = JSON.parse(content);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${SERVER_ORIGIN}/state`);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.responseType = 'json';
+        xhr.addEventListener('load', function(e){
+          document.dispatchEvent(new CustomEvent('SKCM.StateApproved', {detail: e.target.response}));
+        });
+        xhr.send(JSON.stringify(state));
+      });
+      return true;
+    }
+    if(e.dataTransfer.items) {
+      [].some.call(e.dataTransfer.items, function(item, i){
+        if (item.kind !== 'file') return;
+        const file = item.getAsFile();
+        if (processFile(file)) return true;
+      });
+    } else {
+      [].some.call(e.dataTransfer.files, function(item, i){
+        if (processFile(file)) return true;
+      });
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function(e){
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${SERVER_ORIGIN}/state`);
+    xhr.responseType = 'json';
+    xhr.addEventListener('load', function(e){
+      document.dispatchEvent(new CustomEvent('SKCM.StateApproved', {detail: e.target.response}));
+    });
+    xhr.send();
+  });
+  document.addEventListener('DOMContentLoaded', function(e){
+    const elm = document.getElementById('selection-group');
+    elm.addEventListener('change', function(e){
+      if (!elm.value) return;
+      elm.disabled = true;
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', `${SERVER_ORIGIN}/galleries/artist/${elm.value}`);
+      xhr.responseType = 'json';
+      xhr.addEventListener('load', function(e){
+        document.dispatchEvent(new CustomEvent('SKCM.BatchLoad', {detail: e.target.response}));
+        elm.disabled = false;
+      });
+      xhr.send();
+    });
+  });
+  document.addEventListener('DOMContentLoaded', function(e){
+    const gridOp = document.getElementById('image-grid-op');
+    const stateBoxes = gridOp.children[2];
+    Element.prototype.append.apply(stateBoxes, Array.from({length: 6}).map(function(){ return document.createElement('input'); }));
+    stateBoxes.children[0].name = 'flag-archive';
+    stateBoxes.children[0].type = 'checkbox';
+    for(let i=1; i<=4; i++) {
+      stateBoxes.children[i].name = 'flag-deletion';
+      stateBoxes.children[i].type = 'radio';
+      stateBoxes.children[i].value = ['censor', 'crop', 'paywall', 'no reason'][i - 1];
+      stateBoxes.children[i].title = stateBoxes.children[i].value;
+      stateBoxes.children[i].addEventListener('change', function(e){
+        if(stateBoxes.children[5].disabled) stateBoxes.children[5].disabled = false;
+      });
+    }
+    stateBoxes.children[5].name = 'flag-deletion-clear';
+    stateBoxes.children[5].type = 'checkbox';
+    stateBoxes.querySelectorAll('input').forEach(function(elm){ elm.disabled = true; });
+    stateBoxes.children[5].addEventListener('change', function(e){
+      if(!e.target.checked) return;
+      e.target.checked = false;
+      for(let i=1; i<=4; i++) {
+        stateBoxes.children[i].checked = false;
+      }
+      e.target.disabled = true;
+    });
+    document.getElementById('op-submit').addEventListener('click', function(e){
+      const grid = document.getElementById('image-grid');
+      const payload = {};
+      const archiveTick = gridOp.querySelector('input[name=flag-archive]');
+      const deleteOption = gridOp.querySelector('input[name=flag-deletion]:checked');
+      const artworkElms = [];
+      [].push.apply(artworkElms, grid.querySelectorAll('div.selected[data-pixiv-id][data-artwork-state]'));
+      if (!artworkElms.length)
+        [].push.apply(artworkElms, grid.querySelectorAll('div[data-pixiv-id][data-artwork-state]'));
+
+      payload.pixiv_id = Number(document.getElementById('selection-group').value);
+      payload.hashes = artworkElms.map(function(elm){ return elm.dataset.artworkHash; });
+      if (archiveTick.indeterminate)
+        payload.state = null;
+      else
+        payload.state = (archiveTick.checked) ? 'archive' : 'inbox';
+      payload.deletion = deleteOption ? deleteOption.value : null;
+      payload.tags = {add: [], delete: []};
+      gridOp.querySelectorAll('textarea').forEach(function(elm){
+        const k = elm.name.replace('-tags', '');
+        const tags = elm.value.split(/$/m).map(function(tag){return tag.trim();}).filter(function(tag){return tag.length;});
+        payload.tags[k] = tags;
+      });
+
+      const self = e.target;
+      self.disabled = true;
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${SERVER_ORIGIN}/galleries/op`);
+      xhr.responseType = 'json';
+      xhr.addEventListener('load', function(e){
+        if (e.target.response)
+          document.dispatchEvent(new CustomEvent('SKCM.BatchLoad', {detail: e.target.response}));
+        self.disabled = false;
+      });
+      xhr.send(JSON.stringify(payload));
+    });
+  });
+  document.addEventListener('DOMContentLoaded', function(){
+    const timeoutDuration = 2000;
+    const delay           =  100;
+    let suspend = false;
+    function now() { return (new Date()).getTime(); }
+    document.querySelectorAll('#image-grid-op textarea').forEach(function(elm){
+      let lastInputTime = -1;
+      let lastInputLine;
+      function lines() { return elm.value.split(/$/m).map(function(tag){ return tag.trim(); }).filter(function(tag){return tag.length;}); };
+      setInterval(function(){
+        if (typeof lastInputLine !== 'number') return;
+        if (lastInputTime < 0) return;
+        if (suspend) {
+          lastInputTime += delay;
+          return;
+        }
+        if (now() - lastInputTime < timeoutDuration) return;
+
+        console.log(lastInputLine, lines());
+        const inputLine = lines()[lastInputLine];
+        elm.value = lines().join("\n");
+
+        lastInputTime = -1;
+        lastInputLine = undefined;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${SERVER_ORIGIN}/tags`);
+        xhr.responseType = 'json';
+        xhr.addEventListener('load', function(e){
+          suspend = false;
+          if (!e.target.response) return;
+          document.dispatchEvent(new CustomEvent('SKCM.RefreshTagSuggestions', {detail: e.target.response}));
+          document.dispatchEvent(new CustomEvent('SKCM.RefreshOnClickCopy', {}));
+        });
+        suspend = true;
+        xhr.send(inputLine);
+      }, delay);
+      elm.addEventListener('input', function(){
+        lastInputTime = now();
+        const rawLines = elm.value.split(/$/m).map(function(tag){ return tag.trim(); });
+        const rawLineCount = rawLines.map(function(line){ return line.length; }).reduce(function(ary, len){
+          const lastLen = ary.length > 0 ? ary.slice(-1)[0][0] : 0;
+          ary.push([lastLen + len, len]);
+          return ary;
+        }, []);
+        const textLines = lines();
+        const rawLineIndex = rawLineCount.findLastIndex(function(lenPair){ return elm.selectionEnd >= lenPair[0]; });
+
+        lastInputLine = textLines.map(function(tag){return rawLines.indexOf(tag);}).indexOf(rawLineIndex);
+      });
+    });
+  });
+  </script>
+</body>
+</html>

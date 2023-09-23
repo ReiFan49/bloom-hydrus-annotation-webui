@@ -1,0 +1,20 @@
+{
+  "server": {
+    "key": "server api key here",
+    "url": "server link here",
+    "__eof__": true
+  },
+
+  "help me!": {
+    "what are those __eof__ markers?": "nothing. putting commas on every entries feel more consistent to me.",
+    "what is this key": "if you read this, you are confused.",
+    "so which keys I should follow?": "anything above this.",
+    "will my hydrus guarantee to work with this?":
+      "I doubt so, this is specifically made with my own server, my own parser in mind.",
+    "can I use it personally?": "do it.",
+    "can I package it somewhere else, or make it commercial?": "no. I do not grant those.",
+
+    "__eof__": true
+  }
+  "__eof__": true
+}
