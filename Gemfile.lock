@@ -1,0 +1,15 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    cbor (0.5.9.6)
+    rack (2.2.3)
+
+PLATFORMS
+  x64-mingw32
+
+DEPENDENCIES
+  cbor
+  rack
+
+BUNDLED WITH
+   2.1.4
