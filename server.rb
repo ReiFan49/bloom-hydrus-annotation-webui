@@ -151,16 +151,7 @@ module Hydrus
       end
 
       def route_image_load_batch
-        artist_id = @req.params['pixiv_id'].to_i
-        order_id  = @app.state.dig('user_images', 'keys').index(artist_id)
-        pixiv_ids = @app.state.dig('user_images', 'values').at(order_id)
-        batch_output = normalize_hydrus_metadata(*pixiv_ids)
-        if batch_output.empty? then
-          @app.state['user_images']['keys'].delete_at(order_id)
-          @app.state['user_images']['values'].delete_at(order_id)
-          @app.save_state!
-        end
-
+        batch_output = load_batch_data_of_artist(@req.params['pixiv_id'].to_i)
         json(200, batch_output)
       end
 
@@ -213,16 +204,7 @@ module Hydrus
           end
         end
 
-        artist_id = batch_data['pixiv_id']
-        order_id  = @app.state.dig('user_images', 'keys').index(artist_id)
-        pixiv_ids = @app.state.dig('user_images', 'values').at(order_id)
-        batch_output = normalize_hydrus_metadata(*pixiv_ids)
-        if batch_output.empty? then
-          @app.state['user_images']['keys'].delete_at(order_id)
-          @app.state['user_images']['values'].delete_at(order_id)
-          @app.save_state!
-        end
-
+        batch_output = load_batch_data_of_artist(batch_data['pixiv_id'])
         json(200, batch_output)
       end
 
@@ -285,6 +267,22 @@ module Hydrus
         end
 
         output
+      end
+
+      def load_batch_data_of_artist(artist_id)
+        batch_output = []
+        if @app.state.dig('user_images', 'keys').include? artist_id then
+          order_id  = @app.state.dig('user_images', 'keys').index(artist_id)
+          pixiv_ids = @app.state.dig('user_images', 'values').at(order_id)
+          batch_output = normalize_hydrus_metadata(*pixiv_ids)
+          if batch_output.empty? then
+            @app.state['user_images']['keys'].delete_at(order_id)
+            @app.state['user_images']['values'].delete_at(order_id)
+            @app.save_state!
+          end
+        end
+
+        batch_output
       end
     end
 
