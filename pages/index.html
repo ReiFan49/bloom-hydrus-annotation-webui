@@ -109,6 +109,8 @@
     selectionNavbar.querySelectorAll('button').forEach(function(buttonElm){buttonElm.remove();});
     dropdownElm.querySelectorAll('option').forEach(function(optionElm){optionElm.remove();});
 
+    const userImageCount = response.user_images.values.reduce(function(x, y){ return x + y.length; }, 0);
+
     const optionElmList = [];
     const jumpIDs = [];
     if(response.user_images)
@@ -116,6 +118,9 @@
         const firstImageID = response.user_images.values[i][0];
         const artist = response.users.find(function(user){ return user.id == artistID; });
         const optionElm = document.createElement('option');
+        const imagePopulation = 100 * response.user_images.values[i].length / Math.max(1, userImageCount);
+        const imageProgression = 100 * response.user_images.values.slice(0, i).reduce(function(x, y){ return x + y.length; }, 0) / Math.max(1, userImageCount);
+
         optionElm.textContent = artistID > 0 ?
           `#${firstImageID.toLocaleString('en-US')}: ${artist.name} (${artist.username})` :
           `<DELETED>`;
@@ -124,7 +129,10 @@
           optionElm.dataset.artistName = artist.name;
           optionElm.dataset.artistUsername = artist.username;
         }
-        optionElm.label = artistID > 0 ? firstImageID : 'deleted';
+
+        const baseLabel = artistID > 0 ? firstImageID : 'deleted';
+
+        optionElm.label = `${baseLabel} (${imageProgression.toFixed(1)}%/${imagePopulation.toFixed(3)}%)`;
         optionElm.value = artistID;
         if (artistID > 0) jumpIDs.push(firstImageID);
         return optionElm;
