@@ -268,9 +268,13 @@
         headerCells[0].children[2].append(`Artist: #${Number(pixivData.user_id).toLocaleString('en-US')}`);
       }
       if (pixivData.title && pixivData.caption) {
-        headerCells[1].append(pixivData.title, document.createElement('hr'), pixivData.caption);
+        headerCells[1].innerHTML = [
+          pixivData.title,
+          "<hr>",
+          pixivData.caption
+        ].join('');
       } else {
-        headerCells[1].append(pixivData.title || pixivData.caption);
+        headerCells[1].innerHTML = pixivData.title || pixivData.caption;
       }
       headerCells[2].classList.add('grid');
       headerCells[2].style.fontSize = '0.95em';
